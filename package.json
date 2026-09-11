@@ -22,5 +22,6 @@
     "productName": "jrz's Soundpack Tool",
     "files": ["main.js", "preload.js", "src/**/*", "assets/**/*"],
     "win": { "target": "nsis" }
+    "dist": "electron-builder --publish=never"
   }
 }
