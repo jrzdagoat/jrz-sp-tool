@@ -1,0 +1,12 @@
+{
+  "_comment": "Local key list. Add one entry per licensed user. 'used' is set automatically once a key logs in on a machine (simple single-activation lock via machine hash) unless lockToMachine is false.",
+  "lockToMachine": true,
+  "keys": [
+    {
+      "key": "JRZ-DEMO-0000-0000",
+      "owner": "Demo",
+      "active": true,
+      "machineId": null
+    }
+  ]
+}

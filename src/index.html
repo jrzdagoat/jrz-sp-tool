@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>jrz's Soundpack Tool</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <p class="brand"><span style="color:var(--accent)">jrz's</span> Soundpack Tool</p>
+    <div class="actions">
+      <input id="resourceName" class="btn" style="cursor:text;min-width:200px" placeholder="resource name (e.g. jrz_gunsounds)" value="jrz_soundpack" />
+      <button id="clearAll" class="btn">Clear all</button>
+      <button id="exportBtn" class="btn accent">Export sound pack</button>
+    </div>
+  </div>
+  <div class="hint">Drop audio files on a slot, or click a slot to browse. Each slot can hold multiple sounds — one is picked at random in-game.</div>
+
+  <div id="slots" class="slots"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

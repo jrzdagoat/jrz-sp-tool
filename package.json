@@ -1,0 +1,26 @@
+{
+  "name": "jrz-soundpack-tool",
+  "productName": "jrz's Soundpack Tool",
+  "version": "1.0.0",
+  "description": "Import custom weapon sounds and export them as a ready-to-use FiveM sound resource.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "author": "jrz",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.jrz.soundpacktool",
+    "productName": "jrz's Soundpack Tool",
+    "files": ["main.js", "preload.js", "src/**/*", "assets/**/*"],
+    "win": { "target": "nsis" }
+  }
+}
