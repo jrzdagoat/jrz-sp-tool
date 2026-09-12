@@ -1,12 +1,15 @@
 {
-  "_comment": "Local key list. Add one entry per licensed user. 'used' is set automatically once a key logs in on a machine (simple single-activation lock via machine hash) unless lockToMachine is false.",
+  "_comment": "Local key list. Managed with keygen.js (node keygen.js generate/list/check/activate/deactivate/delete) - editing by hand also works, just keep the shape. 'expiresAt' is null for lifetime keys, otherwise an ISO date. 'machineId' fills in automatically on first successful login (single-activation lock) unless lockToMachine is false.",
   "lockToMachine": true,
   "keys": [
     {
       "key": "JRZ-DEMO-0000-0000",
       "owner": "Demo",
       "active": true,
-      "machineId": null
+      "machineId": null,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "plan": "lifetime",
+      "expiresAt": null
     }
   ]
 }

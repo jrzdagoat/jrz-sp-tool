@@ -2,8 +2,18 @@
 
 An Electron desktop app: sign in with a license key, drag your custom weapon
 sounds onto slots (Headshot, Pistols, SMGs, Rifles, Shotguns, Snipers,
-Machine guns, Heavy, Reload, Shell casings, Footsteps...), then export a
-ready-to-drop FiveM resource.
+Machine guns, Heavy, Suppressed, Reload, Shell casings, Footsteps...), then
+export a ready-to-drop FiveM resource.
+
+Works with any soundpack - you only fill in the slots you have audio for;
+anything left empty is never generated and never touched. Weapon-specific
+slots (pistols, smgs, rifles, shotguns, snipers, mgs, heavy, suppressed)
+take the file(s) you drop and duplicate/rename them across every individual
+weapon + variant in that category - e.g. one file dropped on "Suppressed"
+becomes 6 separately-named files, one per suppressed weapon; one file on
+"Pistols" becomes a `shot` + `shot_first` pair for each of the 11 pistols.
+Edit `src/weapon-sound-map.js` to change which weapons/variants each slot
+covers.
 
 ## Important: what "export" actually produces
 
@@ -28,24 +38,46 @@ npm start
 
 ## Add / manage license keys
 
-Keys live in `keys.json` next to the app (copied into the user's app-data
-folder on first run, at `%APPDATA%/jrz's Soundpack Tool/keys.json` on
-Windows, so you can hand out updates without touching that file).
+Use `keygen.js` (no extra install needed — plain Node, same runtime the app
+uses):
+
+```
+node keygen.js generate --owner "SomeCustomer" --plan 30         # 30-day key
+node keygen.js generate --owner "SomeCustomer" --plan 60         # 60-day key
+node keygen.js generate --owner "SomeCustomer" --plan 90         # 90-day key
+node keygen.js generate --owner "SomeCustomer" --plan lifetime   # never expires
+node keygen.js list                                              # every key + VALID/INVALID status
+node keygen.js check JRZ-XXXX-XXXX-XXXX                           # valid/invalid + why
+node keygen.js deactivate JRZ-XXXX-XXXX-XXXX                      # disable a key
+node keygen.js activate JRZ-XXXX-XXXX-XXXX                        # re-enable it
+node keygen.js delete JRZ-XXXX-XXXX-XXXX                          # remove it entirely
+```
+
+By default it reads/writes `keys.json` next to itself; pass `--file path`
+to point at a different copy (e.g. the live one an already-installed app
+is using, at `%APPDATA%/jrz's Soundpack Tool/keys.json` on Windows).
+
+Keys look like:
 
 ```json
 {
-  "lockToMachine": true,
-  "keys": [
-    { "key": "JRZ-XXXX-XXXX-XXXX", "owner": "SomeCustomer", "active": true, "machineId": null }
-  ]
+  "key": "JRZ-XXXX-XXXX-XXXX",
+  "owner": "SomeCustomer",
+  "active": true,
+  "machineId": null,
+  "createdAt": "2026-09-12T00:00:00.000Z",
+  "plan": "30-day",
+  "expiresAt": "2026-10-12T00:00:00.000Z"
 }
 ```
 
+- `active: false` disables a key without deleting it (same as `deactivate`).
+- `expiresAt: null` = lifetime key, never expires.
+- The app (`main.js` `auth:check`) now rejects a key if it's inactive OR
+  past its `expiresAt`, in addition to the existing machine-lock check.
 - `lockToMachine: true` ties a key to the first PC it's used on (simple
   hostname/platform fingerprint — not tamper-proof, just a basic single-seat
   lock).
-- Set `active: false` to revoke a key without deleting it.
-- `machineId` is filled in automatically on first successful login.
 
 This is a local, offline key list — good enough for gating your own tool
 among friends/customers, but anyone with access to the installed app's

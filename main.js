@@ -27,14 +27,6 @@ function saveKeys(data) {
   fs.writeFileSync(liveKeysPath, JSON.stringify(data, null, 2));
 }
 
-function randomKey() {
-  // JRZ-XXXX-XXXX-XXXX using an unambiguous charset (no 0/O/1/I).
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const group = () =>
-    Array.from({ length: 4 }, () => chars[crypto.randomInt(chars.length)]).join("");
-  return `JRZ-${group()}-${group()}-${group()}`;
-}
-
 function machineId() {
   // Simple, non-invasive machine fingerprint (hostname + platform + arch hash).
   const raw = `${require("os").hostname()}|${process.platform}|${process.arch}`;
@@ -90,6 +82,9 @@ ipcMain.handle("auth:check", (_evt, keyInput) => {
 
   if (!key) return { ok: false, error: "That key doesn't exist." };
   if (!key.active) return { ok: false, error: "That key has been disabled." };
+  if (key.expiresAt && Date.now() > new Date(key.expiresAt).getTime()) {
+    return { ok: false, error: `That key expired on ${new Date(key.expiresAt).toLocaleDateString()}.` };
+  }
 
   const mid = machineId();
   if (data.lockToMachine) {
@@ -103,23 +98,6 @@ ipcMain.handle("auth:check", (_evt, keyInput) => {
   }
 
   return { ok: true, owner: key.owner || "User" };
-});
-
-ipcMain.handle("auth:generateKey", (_evt, owner) => {
-  const data = loadKeys();
-  let key;
-  do {
-    key = randomKey();
-  } while (data.keys.some(k => k.key === key)); // avoid a freak collision
-
-  data.keys.push({
-    key,
-    owner: (owner || "").trim() || "Unnamed",
-    active: true,
-    machineId: null
-  });
-  saveKeys(data);
-  return { ok: true, key };
 });
 
 ipcMain.handle("auth:success", () => {
@@ -144,6 +122,15 @@ ipcMain.handle("files:pick", async (_evt, { multi }) => {
 // ---------- Export ----------
 // Builds a plain FiveM resource (fxmanifest + audio + a client-side trigger
 // script) - NOT an encrypted GTA5 .rpf. See README in the export for why.
+//
+// Works with ANY soundpack: you only need to fill in the slots you have
+// sounds for. Anything left empty is simply never referenced, so nothing
+// about a weapon you didn't provide a sound for is ever touched.
+//
+// Each slot with real WEAPON_* entries (see weapon-sound-map.js) takes the
+// file(s) you dropped and duplicates/renames them across every weapon +
+// variant name in that category - e.g. dropping one file on "Suppressed"
+// produces 6 differently-named copies, one per suppressed weapon.
 ipcMain.handle("export:build", async (_evt, { resourceName, assignments }) => {
   const save = await dialog.showSaveDialog(mainWin, {
     title: "Save sound pack",
@@ -159,27 +146,49 @@ ipcMain.handle("export:build", async (_evt, { resourceName, assignments }) => {
   fs.mkdirSync(soundsDir, { recursive: true });
 
   const manifestLines = [];
-  const clientTriggers = [];
+  const groupTriggers = [];       // for the "ANY"-weapon slots (headshot, reload, casings, footsteps, all)
+  const perWeaponTriggers = {};   // weaponName -> [ "sounds/.../file.wav", ... ]
   let fileCount = 0;
 
   for (const slot of SLOTS) {
     const files = assignments[slot.id] || [];
-    if (!files.length) continue;
+    if (!files.length) continue; // untouched slot - nothing generated, nothing changes for it
 
     const slotDir = path.join(soundsDir, slot.id);
     fs.mkdirSync(slotDir, { recursive: true });
 
-    const copiedNames = [];
-    files.forEach((f, i) => {
-      const ext = path.extname(f.path) || ".wav";
-      const destName = `${slot.id}_${i + 1}${ext}`;
-      fs.copyFileSync(f.path, path.join(slotDir, destName));
-      copiedNames.push(`sounds/${slot.id}/${destName}`);
-      fileCount++;
-    });
+    const isGeneric = !slot.weapons || slot.weapons[0] === "ANY";
+
+    if (isGeneric) {
+      const copiedNames = [];
+      files.forEach((f, i) => {
+        const ext = path.extname(f.path) || ".wav";
+        const destName = `${slot.id}_${i + 1}${ext}`;
+        fs.copyFileSync(f.path, path.join(slotDir, destName));
+        copiedNames.push(`sounds/${slot.id}/${destName}`);
+        fileCount++;
+      });
+      groupTriggers.push({ slot: slot.id, files: copiedNames });
+    } else {
+      // Weapon-specific slot: duplicate/rename the dropped sound(s) across
+      // every weapon x variant combo for this category. If more than one
+      // source file was dropped, cycle through them per weapon for variety.
+      let i = 0;
+      for (const weapon of slot.weapons) {
+        for (const variant of slot.variants) {
+          const src = files[i % files.length];
+          const ext = path.extname(src.path) || ".wav";
+          const destName = `${weapon.toLowerCase()}${variant ? "_" + variant : ""}${ext}`;
+          fs.copyFileSync(src.path, path.join(slotDir, destName));
+          const rel = `sounds/${slot.id}/${destName}`;
+          (perWeaponTriggers[weapon] ||= []).push(rel);
+          fileCount++;
+          i++;
+        }
+      }
+    }
 
     manifestLines.push(`file 'sounds/${slot.id}/*'`);
-    clientTriggers.push({ slot: slot.id, files: copiedNames });
   }
 
   const fxmanifest = `fx_version 'cerulean'
@@ -206,17 +215,29 @@ ${manifestLines.map(l => "  '" + l.replace(/^file '/, "").replace(/'$/, "") + "'
 -- triggered client-side on weapon fire / reload / footsteps.
 -- Tune the trigger conditions below for your server if needed.
 
+-- Per-weapon sounds (from weapon-specific slots: pistols, smgs, rifles,
+-- shotguns, snipers, mgs, heavy, suppressed). Keyed by WEAPON_* name.
+local weaponFiles = ${JSON.stringify(perWeaponTriggers, null, 2)}
+
+-- Generic/group sounds (headshot, all, reload, casings, footsteps).
+-- Only present here if you actually filled that slot.
 local slotFiles = ${JSON.stringify(
-    Object.fromEntries(clientTriggers.map(t => [t.slot, t.files])),
+    Object.fromEntries(groupTriggers.map(t => [t.slot, t.files])),
     null,
     2
   )}
 
-local function playRandom(slot)
-  local files = slotFiles[slot]
-  if not files or #files == 0 then return end
-  local pick = files[math.random(1, #files)]
-  SendNUIMessage({ action = "play", src = pick })
+local function playFrom(list)
+  if not list or #list == 0 then return false end
+  SendNUIMessage({ action = "play", src = list[math.random(1, #list)] })
+  return true
+end
+
+local function weaponName(weaponHash)
+  for name, _ in pairs(weaponFiles) do
+    if GetHashKey(name) == weaponHash then return name end
+  end
+  return nil
 end
 
 CreateThread(function()
@@ -229,21 +250,17 @@ CreateThread(function()
 
     if shooting and not wasShooting then
       local weapon = GetSelectedPedWeapon(ped)
-      local group = GetWeapontypeGroup(weapon)
-      -- crude weapon-group -> slot mapping, adjust hashes as you like
-      if slotFiles.pistols and group == GetHashKey('GROUP_PISTOL') then playRandom('pistols')
-      elseif slotFiles.smgs and group == GetHashKey('GROUP_SMG') then playRandom('smgs')
-      elseif slotFiles.rifles and group == GetHashKey('GROUP_RIFLE') then playRandom('rifles')
-      elseif slotFiles.shotguns and group == GetHashKey('GROUP_SHOTGUN') then playRandom('shotguns')
-      elseif slotFiles.snipers and group == GetHashKey('GROUP_SNIPER') then playRandom('snipers')
-      elseif slotFiles.mgs and group == GetHashKey('GROUP_MG') then playRandom('mgs')
-      elseif slotFiles.heavy and group == GetHashKey('GROUP_HEAVY') then playRandom('heavy')
-      else playRandom('all') end
-      playRandom('casings')
+      local name = weaponName(weapon)
+      -- Only plays if THIS specific weapon has a sound assigned; otherwise
+      -- falls back to 'all' if you filled that slot, or plays nothing so
+      -- the weapon's default sound is left alone.
+      if name then playFrom(weaponFiles[name])
+      else playFrom(slotFiles.all) end
+      playFrom(slotFiles.casings)
     end
 
     if reloading and not wasReloading then
-      playRandom('reload')
+      playFrom(slotFiles.reload)
     end
 
     wasShooting, wasReloading = shooting, reloading
@@ -256,7 +273,7 @@ CreateThread(function()
     Wait(150)
     local ped = PlayerPedId()
     local moving = IsPedRunning(ped) or IsPedSprinting(ped) or IsPedWalking(ped)
-    if moving and not wasMoving then playRandom('footsteps') end
+    if moving and not wasMoving then playFrom(slotFiles.footsteps) end
     wasMoving = moving
   end
 end)
@@ -266,7 +283,7 @@ AddEventHandler('gameEventTriggered', function(name, args)
   if name == 'CEventNetworkEntityDamage' then
     local victim, attacker, _, _, isDead, weapon, isHeadshot = args[1], args[2], args[3], args[4], args[5], args[6], args[7]
     if attacker == PlayerPedId() and isDead == 1 and isHeadshot == 1 then
-      playRandom('headshot')
+      playFrom(slotFiles.headshot)
     end
   end
 end)
@@ -303,8 +320,18 @@ Instead, client.lua plays your sounds through a small invisible NUI overlay
 whenever it detects you firing, reloading, moving, or landing a headshot
 kill. This is the same trick most "custom gunshot sound" FiveM resources
 use. Treat the trigger logic in client.lua as a starting point - test it on
-your server and adjust the weapon-group mapping / trigger conditions as
-needed.
+your server and adjust it as needed.
+
+Only the slots you actually filled in are included - anything you left
+empty was never generated and is never referenced, so weapons/sounds you
+didn't provide are left completely alone.
+
+Weapon-specific slots (pistols, smgs, rifles, shotguns, snipers, mgs,
+heavy, suppressed) take whatever you dropped in and duplicate/rename it
+across every individual weapon (and variant, e.g. "shot" + "shot_first")
+in that category - see sounds/<slot>/ for the generated file names, and
+src/weapon-sound-map.js in the tool itself if you want to add/remove
+weapons or variants for next time.
 
 INSTALL
 1. Drop the '${resName}' folder into your server's resources directory.
